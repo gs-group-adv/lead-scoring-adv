@@ -181,10 +181,11 @@ export const db = {
   }
 };
 
-/* Webhook.
-   MOCKUP: grava o payload no log local em vez de fazer POST. Em produção,
-   troque o corpo por um fetch para a URL do endpoint (Supabase Edge Function,
-   n8n, Make) e mantenha o registro local só como fallback de auditoria. */
+const WEBHOOK_URL = 'https://webhook.advocaciadeimpacto.adv.br/webhook/forms-adv';
+
+/* Webhook. O registro local fica como fallback de auditoria mesmo com o
+   POST real: se o endpoint cair, o payload não se perde, só não chega
+   na hora. Falha no fetch nunca impede o fluxo do lead. */
 export async function dispararWebhook(evento, payload) {
   const envelope = {
     id: uid(),
@@ -196,14 +197,16 @@ export async function dispararWebhook(evento, payload) {
   log.push(envelope);
   gravar(CHAVES.webhooks, log);
 
-  // Em produção:
-  // await fetch(WEBHOOK_URL, {
-  //   method: 'POST',
-  //   headers: { 'Content-Type': 'application/json' },
-  //   body: JSON.stringify(envelope)
-  // });
+  try {
+    await fetch(WEBHOOK_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(envelope)
+    });
+  } catch (e) {
+    console.error('[webhook] falha ao enviar', evento, e);
+  }
 
-  console.info('[webhook simulado]', evento, envelope);
   return { data: envelope, error: null };
 }
 

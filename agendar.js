@@ -11,6 +11,14 @@ const palco = document.querySelector('#palco');
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c =>
   ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 
+const formatarTelefone = v => {
+  const n = String(v ?? '').replace(/\D/g, '').slice(0, 11);
+  return n.length > 10 ? `(${n.slice(0,2)}) ${n.slice(2,7)}-${n.slice(7)}`
+       : n.length > 6  ? `(${n.slice(0,2)}) ${n.slice(2,6)}-${n.slice(6)}`
+       : n.length > 2  ? `(${n.slice(0,2)}) ${n.slice(2)}`
+       : n;
+};
+
 const MESES = ['janeiro','fevereiro','março','abril','maio','junho',
                'julho','agosto','setembro','outubro','novembro','dezembro'];
 const DIAS_CURTOS = ['D','S','T','Q','Q','S','S'];
@@ -129,7 +137,7 @@ function telaDados() {
       <form id="form" novalidate>
         <div class="field">
           <label for="nome">Nome completo</label>
-          <input id="nome" name="nome" type="text" autocomplete="name" required>
+          <input id="nome" name="nome" type="text" autocomplete="name" value="${esc(contexto?.lead?.nome)}" required>
         </div>
         <div class="field">
           <label for="escritorio">Nome do escritório</label>
@@ -137,11 +145,11 @@ function telaDados() {
         </div>
         <div class="field">
           <label for="whatsapp">WhatsApp com DDD</label>
-          <input id="whatsapp" name="whatsapp" type="tel" inputmode="numeric" placeholder="(11) 90000-0000" required>
+          <input id="whatsapp" name="whatsapp" type="tel" inputmode="numeric" placeholder="(11) 90000-0000" value="${esc(formatarTelefone(contexto?.lead?.whatsapp))}" required>
         </div>
         <div class="field">
           <label for="email">E-mail</label>
-          <input id="email" name="email" type="email" autocomplete="email" required>
+          <input id="email" name="email" type="email" autocomplete="email" value="${esc(contexto?.lead?.email)}" required>
         </div>
         <p class="erro" id="erro" hidden></p>
         <button class="btn chanfro" type="submit" id="confirmar">Confirmar agendamento</button>
@@ -151,13 +159,7 @@ function telaDados() {
   document.querySelector('#voltar').onclick = () => { slotSel = null; render(); };
 
   const wpp = document.querySelector('#whatsapp');
-  wpp.oninput = () => {
-    const n = wpp.value.replace(/\D/g, '').slice(0, 11);
-    wpp.value = n.length > 10 ? `(${n.slice(0,2)}) ${n.slice(2,7)}-${n.slice(7)}`
-              : n.length > 6  ? `(${n.slice(0,2)}) ${n.slice(2,6)}-${n.slice(6)}`
-              : n.length > 2  ? `(${n.slice(0,2)}) ${n.slice(2)}`
-              : n;
-  };
+  wpp.oninput = () => { wpp.value = formatarTelefone(wpp.value); };
 
   document.querySelector('#form').onsubmit = async e => {
     e.preventDefault();
