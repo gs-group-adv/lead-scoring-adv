@@ -2,19 +2,25 @@
    A leitura comercial não aparece aqui: fica no painel interno. */
 
 import { PERGUNTAS, calcular } from './scoring.js';
-import { db } from './db.js';
+import { db, dispararWebhook } from './db.js';
 import { capturarOrigem, origemAtual } from './origem.js';
 
 capturarOrigem();
 
+const TOTAL = PERGUNTAS.length + 1; // 6 perguntas + etapa de contato
+
 let i = 0;
 const respostas = [];
+let contato = { nome: '', email: '', whatsapp: '' };
 
 const $ = s => document.querySelector(s);
 const palco = $('#palco');
 const barra = $('#barra span');
 
-const progresso = () => { barra.style.width = (i / PERGUNTAS.length) * 100 + '%'; };
+const esc = s => String(s ?? '').replace(/[&<>"']/g, c =>
+  ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+
+const progresso = () => { barra.style.width = (i / TOTAL) * 100 + '%'; };
 
 function telaIntro() {
   barra.style.width = '0%';
@@ -75,8 +81,77 @@ function escolher(n, botao) {
   respostas[i] = PERGUNTAS[i].opcoes[n];
   setTimeout(() => {
     i++;
-    i < PERGUNTAS.length ? telaPergunta() : finalizar();
+    i < PERGUNTAS.length ? telaPergunta() : telaContato();
   }, 200);
+}
+
+/* Etapa 7: dados de contato. Fica depois das perguntas, sobre as quais o
+   scoring não depende — só serve para o time conseguir levar a Sessão
+   Estratégica e os materiais até o lead. */
+function telaContato() {
+  progresso();
+  palco.innerHTML = `
+    <div class="step estreito">
+      <button class="btn-back" id="voltar-contato">← Voltar</button>
+      <span class="eyebrow">Última etapa</span>
+      <h1 class="q-title">Para quem enviamos o resultado?</h1>
+      <p class="q-help">Usamos isso só para levar sua Sessão Estratégica e os materiais gratuitos até você.</p>
+
+      <form id="form-contato" novalidate>
+        <div class="field">
+          <label for="c-nome">Nome completo</label>
+          <input id="c-nome" name="nome" type="text" autocomplete="name" value="${esc(contato.nome)}" required>
+        </div>
+        <div class="field">
+          <label for="c-email">E-mail</label>
+          <input id="c-email" name="email" type="email" autocomplete="email" value="${esc(contato.email)}" required>
+        </div>
+        <div class="field">
+          <label for="c-whatsapp">WhatsApp com DDD</label>
+          <input id="c-whatsapp" name="whatsapp" type="tel" inputmode="numeric" placeholder="(11) 90000-0000" value="${esc(contato.whatsapp)}" required>
+        </div>
+        <p class="erro" id="erro-contato" hidden></p>
+        <button class="btn chanfro" type="submit" id="concluir">Concluir
+          <svg width="15" height="11" viewBox="0 0 15 11" fill="none" aria-hidden="true">
+            <path d="M1 5.5h12M9 1.5l4 4-4 4" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </button>
+      </form>
+    </div>`;
+
+  document.querySelector('#voltar-contato').onclick = () => { i--; respostas.pop(); telaPergunta(); };
+
+  const wpp = $('#c-whatsapp');
+  wpp.oninput = () => {
+    const n = wpp.value.replace(/\D/g, '').slice(0, 11);
+    wpp.value = n.length > 10 ? `(${n.slice(0,2)}) ${n.slice(2,7)}-${n.slice(7)}`
+              : n.length > 6  ? `(${n.slice(0,2)}) ${n.slice(2,6)}-${n.slice(6)}`
+              : n.length > 2  ? `(${n.slice(0,2)}) ${n.slice(2)}`
+              : n;
+  };
+
+  $('#form-contato').onsubmit = e => {
+    e.preventDefault();
+    const erro = $('#erro-contato');
+    const nome = $('#c-nome').value.trim();
+    const email = $('#c-email').value.trim();
+    const whatsapp = wpp.value.replace(/\D/g, '');
+
+    const falha = !nome ? 'Preencha seu nome.'
+      : !/^\S+@\S+\.\S+$/.test(email) ? 'Confira o e-mail digitado.'
+      : whatsapp.length < 10 ? 'Confira o WhatsApp: precisa de DDD e número.'
+      : null;
+    if (falha) { erro.textContent = falha; erro.hidden = false; return; }
+    erro.hidden = true;
+
+    contato = { nome, email, whatsapp };
+    const btn = $('#concluir');
+    btn.disabled = true;
+    btn.textContent = 'Enviando...';
+    finalizar(contato);
+  };
+
+  $('#c-nome').focus({ preventScroll: true });
 }
 
 document.addEventListener('keydown', e => {
@@ -87,27 +162,40 @@ document.addEventListener('keydown', e => {
   if (n >= 1 && n <= opts.length) { e.preventDefault(); opts[n - 1].click(); }
 });
 
-async function finalizar() {
+async function finalizar(dadosContato) {
   barra.style.width = '100%';
   palco.innerHTML = '<p class="carregando">Processando suas respostas...</p>';
 
   const res = calcular(respostas);
 
-  /* A resposta é gravada mesmo sem contato. Quem responde e não agenda
-     aparece no painel como sem contato, o que mostra o abandono do funil. */
+  /* Desde a etapa 7, o contato já vem preenchido junto com a resposta.
+     Quem abandona antes de chegar lá continua aparecendo no painel como
+     sem contato, o que segue medindo o abandono do funil. */
   const { data } = await db.criarResposta({
     score: res.total, score_base: res.base, ajuste: res.ajuste,
     classe: res.classe, degrau: res.degrau, degrau_estrutura: res.degrauEstrutura,
     qualidade: res.qualidade.nivel, area: res.area, perfil: res.perfil,
     pontos: res.pontos, detalhe: res.respostas,
-    origem: origemAtual()
+    origem: origemAtual(),
+    lead: dadosContato
+  });
+
+  await dispararWebhook('resposta.criada', {
+    resposta_id: data?.id || null,
+    score: res.total, classe: res.classe,
+    degrau: res.degrau, degrau_estrutura: res.degrauEstrutura,
+    qualidade: res.qualidade.nivel, area: res.area, perfil: res.perfil,
+    lead: dadosContato,
+    origem: origemAtual(),
+    respostas: res.respostas
   });
 
   try {
     sessionStorage.setItem('adv_contexto_lead', JSON.stringify({
       resposta_id: data?.id || null,
       score: res.total, classe: res.classe,
-      degrau: res.degrau, qualidade: res.qualidade.nivel
+      degrau: res.degrau, qualidade: res.qualidade.nivel,
+      lead: dadosContato
     }));
   } catch { /* sem storage: segue sem contexto */ }
 
